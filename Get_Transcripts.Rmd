@@ -1,0 +1,232 @@
+---
+title: "Primetime Emmy Awards"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(here)
+```
+
+https://en.wikipedia.org/wiki/71st_Primetime_Emmy_Awards
+
+# Outstanding Comedy Series
+* Barry
+* Fleabag
+* The Good Place
+* The Marvelous Mrs. Maisel
+* Russian Doll
+* Schitt's Creek
+* Veep
+
+# Oustanding Drama Series
+* Better Call Saul
+* Bodyguard
+* Game of Thrones
+* Killing Eve
+* Ozark
+* Pose
+* Succession
+* This Is Us
+
+```{r}
+show <- c("Barry"
+          ,"Fleabag"
+          ,"The Good Place"
+          ,"The Marvelous Mrs. Maisel"
+          ,"Russian Doll"
+          ,"Schitt's Creek"
+          ,"Veep"
+          ,"Better Call Saul"
+          ,"Bodyguard"
+          ,"Game of Thrones"
+          ,"Killing Eve"
+          ,"Ozark"
+          ,"Pose"
+          ,"Succession"
+          ,"This Is Us")
+
+url <- c("https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=barry-2018"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=fleabag-2016"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=the-good-place-2016"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=the-marvelous-mrs-maisel-2017"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=russian-doll-2019"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=schitts-creek-2015"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=better-call-saul-2015"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=veep"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=bodyguard-2018"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=game-of-thrones"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=killing-eve-2018"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=ozark-2017"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=pose-2018"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=succession-2018"
+         ,"https://www.springfieldspringfield.co.uk/episode_scripts.php?tv-show=this-is-us-2016")
+
+show_urls <- 
+  data.frame(show = as.character(show),
+             url = as.character(url)) %>% 
+  mutate_all(as.character)
+```
+
+```{r}
+webpage <- read_html(show_urls$url[1])
+```
+
+```{r}
+episode_links <-
+  webpage %>% 
+  html_nodes("#content_container > div.main-content > div.main-content-left > div > a.season-episode-title") %>% 
+  html_attr("href") %>% 
+  paste0("http://springfieldspringfield.co.uk/", .) %>% 
+  data.frame(link = .) %>% 
+  mutate(show = show_urls$show[1],
+         link = as.character(link))
+```
+
+```{r}
+
+get_episode_urls <- function(show_urls, ...) {
+  
+  for (i in 1:nrow(show_urls)) {
+    
+    # Load webpage
+    webpage <- read_html(show_urls$url[i])
+    
+    if (i == 1) {
+      
+      # Get episode list
+      episode_links <-
+        webpage %>% 
+        html_nodes("#content_container > div.main-content > div.main-content-left > div > a.season-episode-title") %>% 
+        html_attr("href") %>% 
+        paste0("http://springfieldspringfield.co.uk/", .) %>% 
+        data.frame(link = .) %>% 
+        mutate(show = show_urls$show[i],
+               link = as.character(link))
+      
+    } else {
+      
+      episode_links_temp <-
+        webpage %>% 
+        html_nodes("#content_container > div.main-content > div.main-content-left > div > a.season-episode-title") %>% 
+        html_attr("href") %>% 
+        paste0("http://springfieldspringfield.co.uk/", .) %>% 
+        data.frame(link = .) %>% 
+        mutate(show = show_urls$show[i],
+               link = as.character(link))
+      
+      episode_links <- rbind(episode_links, episode_links_temp)
+      
+    }
+    
+    Sys.sleep(3)
+    print(i)
+    
+  }  
+  
+  return(episode_links)
+  
+}
+
+```
+
+```{r}
+episode_urls <- get_episode_urls(show_urls = show_urls)
+```
+
+```{r}
+script_url <- read_html(episode_urls$link[1])
+```
+
+```{r}
+script_url %>% 
+  html_nodes("h3") %>% 
+  html_text()
+```
+
+
+```{r}
+script_url %>% 
+  html_nodes("#content_container > div.main-content > div.main-content-left > div.episode_script > div.scrolling-script-container") %>% 
+  html_text()
+```
+
+```{r}
+get_transcript <- function(episode_urls, ...) {
+  
+  episode_urls <- 
+    episode_urls %>% 
+    mutate(title = NA,
+           transcript = NA)
+  
+  for (i in 1:nrow(episode_urls)) {
+    
+    # Check webpage
+    webpage_check <- try(
+      transcript_url <- read_html(episode_urls$link[i])
+      ,silent = TRUE
+    )
+    
+    if (class(webpage_check) != "try-error") {
+      
+      # Check transcript
+      transcript_check <- try(
+        episode_urls$transcript[i] <-
+          transcript_url %>% 
+          html_nodes("#content_container > div.main-content > div.main-content-left > div.episode_script > div.scrolling-script-container") %>% 
+          html_text()
+        , silent = TRUE
+      )
+      
+      if (class(transcript_check) == "try-error") {
+        episode_urls$transcript[i] <- NA
+      }
+      
+      # Check title
+      title_check <- try(
+        episode_urls$title[i] <-
+          transcript_url %>% 
+          html_nodes("h3") %>% 
+          html_text()
+        ,silent = TRUE
+      )
+      
+      if (class(transcript_check) == "try-error") {
+        episode_urls$title[i] <- NA
+      }
+      
+    }
+    
+    Sys.sleep(1)
+    print(paste(i, "/", nrow(episode_urls)))
+    
+  }  
+  
+  return(episode_urls)
+  
+}
+```
+
+```{r}
+
+transcripts <- get_transcript(episode_urls = episode_urls)
+
+```
+
+```{r}
+transcripts <-
+  transcripts %>% 
+  mutate(season = as.numeric(str_remove(str_extract(link, "s[0-9]{2}"), "s")),
+         episode = as.numeric(str_remove(str_extract(link, "e[0-9]{2}"), "e"))) %>% 
+  select(show, season, episode, title, link, transcript)
+```
+
+```{r}
+write_csv(transcripts, "transcripts.csv")
+```
+

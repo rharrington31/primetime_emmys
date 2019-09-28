@@ -1,0 +1,488 @@
+---
+title: "Primetime Emmy Awards"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages("tidyverse")
+library(tidyverse)
+
+# install.packages("tidytext")
+library(tidytext)
+
+# install.packages("textdata")
+library(textdata)
+
+# install.packages("here")
+library(here)
+
+# install.packages("ggdendro")
+library(ggdendro)
+```
+
+```{r}
+source(here::here("Formatting.R"))
+theme_set(theme_compassred())
+```
+
+```{r}
+comedy <- c("Barry"
+            ,"Fleabag"
+            ,"The Good Place"
+            ,"The Marvelous Mrs. Maisel"
+            ,"Russian Doll"
+            ,"Schitt's Creek"
+            ,"Veep")
+
+drama <- c("Better Call Saul"
+           ,"Bodyguard"
+           ,"Game of Thrones"
+           ,"Killing Eve"
+           ,"Ozark"
+           ,"Pose"
+           ,"Succession"
+           ,"This Is Us")
+
+winners <- c("Fleabag", "Game of Thrones")
+```
+
+```{r}
+transcripts <- read_csv(here::here("transcripts.csv")) %>% 
+  mutate(nomination_type = case_when(show %in% comedy ~ "comedy",
+                                     show %in% drama ~ "drama"),
+         winner = if_else(show %in% winners, T, F))
+```
+
+```{r}
+episode_numbers <-
+  transcripts %>% 
+  distinct(show, season, episode) %>% 
+  arrange(show, season, episode) %>% 
+  group_by(show) %>% 
+  mutate(episode_number = 1:n()) %>% 
+  ungroup()
+```
+
+```{r}
+data("stop_words")
+nrc <- get_sentiments("nrc")
+```
+
+```{r}
+primetime_tokens <-
+  transcripts %>%
+  unnest_tokens(word, transcript) %>%
+  anti_join(stop_words, by = "word")
+```
+
+```{r}
+emotions <-
+  primetime_tokens %>% 
+  left_join(nrc, by = "word")
+
+episode_emotions <- 
+  emotions %>% 
+  count(show, season, episode, nomination_type, winner, sentiment, name = "occurrences") %>% 
+  arrange(show, season, episode, desc(occurrences)) %>% 
+  group_by(show, season, episode) %>% 
+  mutate(total_occurrences = sum(occurrences)) %>% 
+  ungroup() %>% 
+  mutate(percent = occurrences / total_occurrences)
+```
+
+# Average Percent of Sentiments for Tokenized Words for the Most Recent Season by Show
+
+## All
+
+```{r}
+episode_emotions %>% 
+  filter(! sentiment %in% c("positive", "negative", NA)) %>% 
+  group_by(show) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  group_by(show, season,nomination_type, winner, sentiment) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup() %>% 
+  group_by(show) %>% 
+  arrange(desc(mean_percent)) %>% 
+  mutate(show_rank = 1:n()) %>% 
+  ungroup() %>% 
+  group_by(sentiment) %>% 
+  mutate(sentiment_mean = mean(mean_percent)) %>% 
+  ungroup() %>% 
+  mutate(sentiment = fct_rev(fct_reorder(sentiment, sentiment_mean))) %>% 
+  ggplot() +
+  geom_col(aes(x = show,
+               y = mean_percent,
+               fill = T)) +
+  facet_grid(nomination_type ~ sentiment, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d() +
+  coord_flip() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   hjust = 1,
+                                   size = 6),
+        legend.position = "none") +
+  labs(x = "",
+       y = "Percent of Words")
+
+ggsave(here::here("Visualizations", "01_average_sentiments_all_shows_bar.png"),
+       dpi = 300, width = 8, height = 4.5)
+```
+
+## With Ranks
+
+```{r}
+episode_emotions %>% 
+  filter(! sentiment %in% c("positive", "negative", NA)) %>% 
+  group_by(show) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  group_by(show, season,nomination_type, winner, sentiment) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup() %>% 
+  group_by(show) %>% 
+  arrange(desc(mean_percent)) %>% 
+  mutate(show_rank = 1:n()) %>% 
+  ungroup() %>% 
+  group_by(sentiment) %>% 
+  mutate(sentiment_mean = mean(mean_percent)) %>% 
+  ungroup() %>% 
+  mutate(sentiment = fct_rev(fct_reorder(sentiment, sentiment_mean))) %>% 
+  ggplot() +
+  geom_col(aes(x = show,
+               y = mean_percent,
+               fill = as.factor(show_rank))) +
+  facet_grid(nomination_type ~ sentiment, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d(direction = -1) +
+  coord_flip() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   hjust = 1,
+                                   size = 6)) +
+  labs(x = "",
+       y = "Percent of Words",
+       fill = "rank")
+
+ggsave(here::here("Visualizations", "02_average_sentiments_all_shows_with_ranks_bar.png"),
+       dpi = 300, width = 8, height = 4.5)
+```
+
+## Last Season Trust Words
+
+```{r}
+get_top_sentiment_tokens <- function(tv_show,
+                                     emotion,
+                                     ...) {
+  emotions %>% 
+    filter(sentiment == emotion) %>% 
+    filter(show == tv_show) %>% 
+    filter(season == max(season)) %>% 
+    count(show, word, sort = T)
+}
+```
+
+```{r}
+emotions %>% 
+  distinct(show) %>% 
+  unlist() %>% 
+  unname() %>% 
+  map_df(.x = .,
+         .f = get_top_sentiment_tokens,
+         show = .,
+         emotion = "trust") %>% 
+  group_by(show) %>% 
+  mutate(rank = 1:n()) %>% 
+  ungroup() %>% 
+  filter(rank <= 5) %>% 
+  mutate(word = reorder_within(word, -rank, show)) %>% 
+  ggplot(aes(x = word,
+             y = n,
+             fill = T)) +
+  geom_col() +
+  coord_flip() +
+  scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
+  facet_wrap(~ show, scales = "free_y", ncol = 3) +
+  scale_fill_viridis_d() +
+  theme(legend.position = "none")
+```
+
+## Without "god"
+
+```{r}
+emotions %>% 
+  add_count(show, season, episode, name = "total_occurrences") %>% 
+  filter(! word %in% c("god")) %>% 
+  count(show, season, episode, nomination_type, winner, sentiment, total_occurrences, name = "occurrences") %>% 
+  arrange(show, season, episode, desc(occurrences)) %>% 
+  # group_by(show, season, episode) %>% 
+  # mutate(total_occurrences = sum(occurrences)) %>% 
+  # ungroup() %>% 
+  mutate(percent = occurrences / total_occurrences) %>% 
+  filter(! sentiment %in% c("positive", "negative", NA)) %>% 
+  group_by(show) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  group_by(show, season,nomination_type, winner, sentiment) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup() %>% 
+  group_by(show) %>% 
+  arrange(desc(mean_percent)) %>% 
+  mutate(show_rank = 1:n()) %>% 
+  ungroup() %>% 
+  group_by(sentiment) %>% 
+  mutate(sentiment_mean = mean(mean_percent)) %>% 
+  ungroup() %>% 
+  mutate(sentiment = fct_rev(fct_reorder(sentiment, sentiment_mean))) %>% 
+  ggplot() +
+  geom_col(aes(x = show,
+               y = mean_percent,
+               fill = as.factor(show_rank))) +
+  facet_grid(nomination_type ~ sentiment, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d(direction = -1) +
+  coord_flip() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   hjust = 1,
+                                   size = 6)) +
+  labs(x = "",
+       y = "Percent of Words",
+       fill = "rank")
+
+# ggsave(here::here("Visualizations", "02_average_sentiments_all_shows_with_ranks_bar.png"),
+#        dpi = 300, width = 8, height = 4.5)
+```
+
+# Change in episode emotions for last season
+
+```{r}
+
+# Colors from: https://www.6seconds.org/2017/04/27/plutchiks-model-of-emotions/
+emotion_palette <- c("#ff6b6b", "#ffa968", "#a493c3", "#00b778", "#ffd97f", "#38acda", "#00b3d8", "#a5d171")
+
+episode_emotions %>% 
+  left_join(episode_numbers, by = c("show", "season", "episode")) %>% 
+  filter(!is.na(sentiment)) %>% 
+  filter(! sentiment %in% c("positive", "negative")) %>% 
+  group_by(show) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  ggplot() +
+  geom_line(aes(x = episode,
+                y = percent,
+                color = sentiment)) +
+  scale_color_manual(values = emotion_palette) +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~ show, ncol = 3)
+```
+
+# Average Percent of Sentiments for Tokenized Words by Season and Show
+
+```{r}
+episode_emotions %>% 
+  filter(! sentiment %in% c("positive", "negative", NA)) %>% 
+  group_by(show, season, sentiment) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  geom_col(aes(x = season,
+               y = mean_percent),
+           fill = "#e83536") +
+  facet_grid(sentiment ~ show)
+```
+
+# Average Percent of Sentiments for Tokenized Words for the Most Recent Season by Show
+
+## Aggregate
+
+```{r}
+episode_emotions %>% 
+  filter(! sentiment %in% c("positive", "negative", NA)) %>% 
+  group_by(show) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  group_by(show, season,nomination_type, winner, sentiment) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup() %>% 
+  group_by(show) %>% 
+  arrange(desc(mean_percent)) %>% 
+  mutate(show_rank = 1:n()) %>% 
+  ungroup() %>% 
+  group_by(sentiment) %>% 
+  mutate(sentiment_mean = mean(mean_percent)) %>% 
+  ungroup() %>% 
+  mutate(sentiment = fct_reorder(sentiment, -sentiment_mean)) %>% 
+  ggplot() +
+  geom_col(aes(x = show,
+               y = mean_percent),
+           fill = "#e83536") +
+  facet_grid(nomination_type ~ sentiment, scales = "free_y") +
+  scale_y_continuous(labels = scales::percent) +
+  # scale_fill_gradient(low = "#e83536", high = "#cccccc") +
+  coord_flip() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
+```
+
+```{r}
+get_last_season_average_emotion <- function(emotion, 
+                                            save = FALSE,
+                                            ...) {
+  
+  emotion_plot <-
+    episode_emotions %>% 
+    filter(sentiment == emotion) %>% 
+    group_by(show) %>% 
+    filter(season == max(season)) %>% 
+    ungroup() %>% 
+    filter(episode != 90) %>% 
+    group_by(show, season, sentiment, nomination_type, winner) %>% 
+    summarize(mean_percent = mean(percent)) %>% 
+    ungroup() %>% 
+    mutate(show = fct_reorder(show, mean_percent)) %>% 
+    ggplot() +
+    geom_col(aes(x = show,
+                 y = mean_percent,
+                 fill = nomination_type)) +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_viridis_d() +
+    coord_flip() +
+    labs(x = "",
+         y = "Percent of Last Season",
+         title = emotion,
+         fill = "Nomination")
+  
+  if(save) {
+    ggsave(here::here("Visualizations", paste0("03_average_show_sentiment_",emotion,".png")),
+           dpi = 300, width = 8, height = 4.5)
+  }
+  
+  return(emotion_plot)
+  
+}
+```
+
+# Average Percent of Sentiments for Tokenized Words for the Most Recent Season by Show (Ordered)
+
+```{r}
+emotions %>%
+  distinct(sentiment) %>% 
+  filter(! sentiment %in% c("negative", "positive", NA)) %>% 
+  arrange(sentiment) %>% 
+  unlist() %>% 
+  unname() %>% 
+  map(.x = ., 
+      .f = get_last_season_average_emotion,
+      save = TRUE)
+```
+
+```{r}
+average_last_season_emotions <- 
+  episode_emotions %>% 
+  filter(! sentiment %in% c("negative", "positive", NA)) %>% 
+  group_by(show, nomination_type, winner) %>% 
+  filter(season == max(season)) %>% 
+  ungroup() %>% 
+  filter(episode != 90) %>% 
+  group_by(show, season, sentiment, nomination_type, winner) %>% 
+  summarize(mean_percent = mean(percent)) %>% 
+  ungroup()
+```
+
+```{r}
+average_last_season_emotions %>% 
+  group_by(sentiment) %>% 
+  arrange(sentiment, desc(mean_percent)) %>% 
+  mutate(rank = 1:n()) %>% 
+  ungroup() %>% 
+  group_by(sentiment, nomination_type) %>% 
+  summarize(mean_rank = mean(rank)) %>% 
+  ungroup() %>% 
+  spread(key = nomination_type, value = mean_rank) %>% 
+  arrange(comedy)
+```
+
+
+# Similarity of Shows by Sentiment
+
+```{r}
+average_last_season_emotions_distance <- 
+  average_last_season_emotions %>% 
+  spread(key = sentiment, value = mean_percent) %>% 
+  mutate_at(vars(-show, -season, -nomination_type, -winner), scales::rescale) %>% 
+  arrange(show) %>% 
+  column_to_rownames(var = "show") %>% 
+  select(-season, -nomination_type, -winner) %>% 
+  dist(method = "euclidean")
+```
+
+```{r}
+build_dendrograms <- function(method, ...){
+  show_clusters <-
+    average_last_season_emotions_distance %>% 
+    hclust(method = method)
+  
+  dendrogram <- 
+    ggdendrogram(show_clusters, rotate = TRUE) +
+    labs(title = method)
+  
+  
+  
+  return(list(clusters = show_clusters, 
+              dendro = dendrogram,
+              dendro_data = dendro_data(as.dendrogram(show_clusters))))
+}
+```
+
+```{r}
+hclust_methods <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+hclust_methods %>% 
+  map(.x = .,
+      .f = build_dendrograms)
+```
+
+```{r}
+clusters_complete <- build_dendrograms("ward.D2")
+```
+
+```{r}
+ggplot() +
+  geom_segment(data = segment(clusters_complete$dendro_data),
+               aes(x = x,
+                   y = y,
+                   xend = xend,
+                   yend = yend)) +
+  geom_label(data = label(clusters_complete$dendro_data),
+            aes(x = x,
+                y = y,
+                label = label,
+                fill = if_else(label %in% comedy, F, T),
+                color = if_else(label %in% comedy, F, T)),
+            vjust = 0.5,
+            hjust = 1,
+            nudge_y = -.025,
+            size = 3,
+            fontface = "bold",
+            label.size = 0,
+            label.r = unit(0, "lines")) +
+  expand_limits(y = -0.75) +
+  theme_dendro() +
+  scale_fill_viridis_d() +
+  scale_color_manual(values = c("white", "black")) +
+  coord_flip() +
+  theme(legend.position = "none")
+
+ggsave(here::here("Visualizations", "04_dendrogram_wardD2.png"),
+       dpi = 300, width = 8, height = 4.5)
+```
+
